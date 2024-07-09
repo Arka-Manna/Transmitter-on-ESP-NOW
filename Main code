@@ -1,0 +1,185 @@
+#include <Wire.h>
+#include <esp_now.h>
+#include <WiFi.h>
+#include <U8g2lib.h> // Include u8g2 library for OLED display
+
+// Define OLED display object
+U8G2_SSD1306_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0, /* clock=*/ SCL, /* data=*/ SDA, /* reset=*/ U8X8_PIN_NONE);
+
+// MAC Address of the ESP8266 receiver
+uint8_t receiverAddress[] = {0x24, 0xD7, 0xEB, 0xCC, 0xEE, 0x93};
+
+// Structure to hold sensor data and button states
+typedef struct struct_message {
+  int joy1_x;
+  int joy1_y;
+  int joy2_x;
+  int joy2_y;
+  int pot1;
+  int pot2;
+  bool button_1;
+  bool button_2;
+  bool button_3;
+  bool button_4;
+} struct_message;
+
+// Create an instance to hold sensor data and button states
+struct_message sensorData;
+
+// Joystick and potentiometer pins
+#define JOY1_X_PIN 32
+#define JOY1_Y_PIN 33
+#define JOY2_X_PIN 34
+#define JOY2_Y_PIN 35
+#define POT1_PIN   36
+#define POT2_PIN   39
+
+// Initial Buttons pins
+#define BUTTON_PIN_1 25
+#define BUTTON_PIN_2 26
+#define BUTTON_PIN_3 27
+#define BUTTON_PIN_4 14
+
+// OLED navigation buttons
+#define OLED_BUTTON_UP 2
+#define OLED_BUTTON_DOWN 3
+#define OLED_BUTTON_SELECT 4
+#define OLED_BUTTON_BACK 5 // Example pin for back button
+
+void setup() {
+  Serial.begin(115200);  // Initialize serial communication for debugging
+
+  // Initialize OLED display
+  u8g2.begin();
+  u8g2.setFont(u8g2_font_ncenB08_tr); // Choose a font
+
+  // Display initial message on OLED
+    u8g2.clearBuffer();
+  u8g2.setCursor((128 - u8g2.getStrWidth("Welcome...")) / 2, 20); // Center text horizontally
+  u8g2.print("Welcome...");
+  u8g2.sendBuffer();
+
+  delay(2000); // Wait for 2 seconds
+  
+  u8g2.clearBuffer();
+  u8g2.setCursor((128 - u8g2.getStrWidth("Name: ARKA")) / 2, 20); // Center text horizontally
+  u8g2.print(" ARKA");
+  u8g2.sendBuffer();
+
+  delay(5000);
+
+  // Initialize WiFi
+  WiFi.mode(WIFI_STA);
+
+  // Initialize ESP-NOW
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Error initializing ESP-NOW");
+    return;
+  }
+
+  // Register peer
+  esp_now_peer_info_t peerInfo;
+  memset(&peerInfo, 0, sizeof(peerInfo));  // Clear peerInfo structure
+  memcpy(peerInfo.peer_addr, receiverAddress, 6);  // Copy receiver's MAC address
+  peerInfo.channel = 0;  // Set channel
+  peerInfo.encrypt = false;  // No encryption
+
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+    Serial.println("Failed to add peer");
+    return;
+  }
+
+  // Initialize sensor pins
+  pinMode(JOY1_X_PIN, INPUT);
+  pinMode(JOY1_Y_PIN, INPUT);
+  pinMode(JOY2_X_PIN, INPUT);
+  pinMode(JOY2_Y_PIN, INPUT);
+  pinMode(POT1_PIN, INPUT);
+  pinMode(POT2_PIN, INPUT);
+
+  // Initialize initial button pins with pull-up resistors
+  pinMode(BUTTON_PIN_1, INPUT_PULLUP);
+  pinMode(BUTTON_PIN_2, INPUT_PULLUP);
+  pinMode(BUTTON_PIN_3, INPUT_PULLUP);
+  pinMode(BUTTON_PIN_4, INPUT_PULLUP);
+
+  // Initialize OLED navigation buttons with pull-up resistors
+  pinMode(OLED_BUTTON_UP, INPUT_PULLUP);
+  pinMode(OLED_BUTTON_DOWN, INPUT_PULLUP);
+  pinMode(OLED_BUTTON_SELECT, INPUT_PULLUP);
+  pinMode(OLED_BUTTON_BACK, INPUT_PULLUP); // Initialize back button pin
+}
+
+void loop() {
+  // Read sensor values
+  sensorData.joy1_x = map(analogRead(JOY1_X_PIN), 0, 4095, 0, 1023);
+  sensorData.joy1_y = map(analogRead(JOY1_Y_PIN), 0, 4095, 0, 1023);
+  sensorData.joy2_x = map(analogRead(JOY2_X_PIN), 0, 4095, 0, 1023);
+  sensorData.joy2_y = map(analogRead(JOY2_Y_PIN), 0, 4095, 0, 1023);
+  sensorData.pot1 = map(analogRead(POT1_PIN), 0, 4095, 0, 1023);
+  sensorData.pot2 = map(analogRead(POT2_PIN), 0, 4095, 0, 1023);
+
+  // Read button states
+  sensorData.button_1 = digitalRead(BUTTON_PIN_1) == LOW; // LOW when pressed due to INPUT_PULLUP
+  sensorData.button_2 = digitalRead(BUTTON_PIN_2) == LOW;
+  sensorData.button_3 = digitalRead(BUTTON_PIN_3) == LOW;
+  sensorData.button_4 = digitalRead(BUTTON_PIN_4) == LOW;
+
+  // Update OLED display with sensor readings
+  updateOLED();
+
+  // Send sensor data including button states via ESP-NOW to the receiver
+  esp_err_t result = esp_now_send(receiverAddress, (uint8_t *) &sensorData, sizeof(sensorData));
+  if (result == ESP_OK) {
+    Serial.println("Sent data successfully");
+  } else {
+    Serial.println("Error sending data");
+  }
+
+  // Delay to prevent spamming and allow other operations
+  delay(1000); // Adjust delay as needed for your application
+}
+
+void updateOLED() {
+    u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_5x7_tf); // Use a smaller font
+
+  // Display Joystick data side by side
+  u8g2.drawStr(5, 10, "Joy1 X:");
+  u8g2.setCursor(45, 10);
+  u8g2.print(sensorData.joy1_x);
+  u8g2.drawStr(5, 20, "Joy1 Y:");
+  u8g2.setCursor(45, 20);
+  u8g2.print(sensorData.joy1_y);
+  
+  u8g2.drawStr(69, 10, "Joy2 X:");
+  u8g2.setCursor(109, 10);
+  u8g2.print(sensorData.joy2_x);
+  u8g2.drawStr(69, 20, "Joy2 Y:");
+  u8g2.setCursor(109, 20);
+  u8g2.print(sensorData.joy2_y);
+
+  // Display Potentiometer data
+  u8g2.drawStr(5, 30, "Pot1:");
+  u8g2.setCursor(45, 30);
+  u8g2.print(sensorData.pot1);
+  u8g2.drawStr(5, 40, "Pot2:");
+  u8g2.setCursor(45, 40);
+  u8g2.print(sensorData.pot2);
+
+  // Display button states
+  u8g2.drawStr(5, 50, "Btn 1:");
+  u8g2.setCursor(45, 50);
+  u8g2.print(sensorData.button_1 ? "1" : "0");
+  u8g2.drawStr(5, 60, "Btn 2:");
+  u8g2.setCursor(45, 60);
+  u8g2.print(sensorData.button_2 ? "1" : "0");
+
+  u8g2.drawStr(69, 50, "Btn 3:");
+  u8g2.setCursor(109, 50);
+  u8g2.print(sensorData.button_3 ? "1" : "0");
+  u8g2.drawStr(69, 60, "Btn 4:");
+  u8g2.setCursor(109, 60);
+  u8g2.print(sensorData.button_4 ? "1" : "0");
+  u8g2.sendBuffer();
+}
